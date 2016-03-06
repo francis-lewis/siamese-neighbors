@@ -32,9 +32,7 @@ def reshapeData(data):
     
 def chopra_loss(y_true, y_pred):
     ''' (1-Y)(2/Q)(Ew)^2 + Y2Qe^(-2.77/Q*Ew) '''
-    # Is something wrong here? loss is nan
-    Q = 10.
-    #return y_true - y_pred
+    Q = 100.
     return (1 - y_true) * 2 / Q * K.square(y_pred) + y_true * 2 * Q * K.exp(-2.77 / Q * y_pred)
 
 print 'Getting CIFAR10 data...'
@@ -82,10 +80,10 @@ model = Sequential()
 def l2dist(x):
     ''' x[0] is the output from left
         x[1] is the output from right '''
-    #z = x[0] - x[1]
-    #return K.sqrt(K.sum(K.square(z), keepdims=True))
-    import theano.tensor as T
-    return T.sqrt((T.sqr(x[0] - x[1])).sum(axis=1, keepdims=True))
+    z = x[0] - x[1]
+    return K.sqrt(K.sum(K.square(z), axis=1, keepdims=True))
+    #import theano.tensor as T
+    #return T.sqrt((T.sqr(x[0] - x[1])).sum(axis=1, keepdims=True))
 
 
 model.add(LambdaMerge([left_model, right_model], function=l2dist))
@@ -99,8 +97,8 @@ print 'Fitting model...'
 
 def generate_impostor_data(x, y):
     r = np.arange(x.shape[0])
-    left_ind, right_ind = np.random.permutation(r), np.random.permutation(r)
-    return x[left_ind,:], x[right_ind,:], (np.argmax(y, axis=1) == np.argmax(y, axis=1))
+    rand_ind = np.random.permutation(r)
+    return x, x[rand_ind,:], (np.argmax(y, axis=1) != (np.argmax(y, axis=1)[rand_ind]))
 
 left_perm, right_perm, y = generate_impostor_data(x_train, y_train)
 y = np.concatenate((np.zeros((y_train.shape[0],)), y), axis=0)
@@ -110,7 +108,7 @@ model.fit([np.concatenate((x_train, left_perm), axis=0), np.concatenate((x_train
         y, nb_epoch=5, batch_size=64)
 
 print 'Validating model...'
-val_loss = model.evaluate([x_train, x_train], np.zeros_like(y_train), batch_size=1)
+val_loss = model.evaluate([x_val, x_val], np.zeros(x_val.shape[0],), batch_size=1)
 print 'validation loss: %f' % val_loss
 #left_perm, right_perm, y = generate_impostor_data(x_val, y_val)
 #preds = model.predict_classes([np.concatenate((x_val, left_perm), axis=0), np.concatenate((x_val, right_perm), axis=0)], batch_size=1)
