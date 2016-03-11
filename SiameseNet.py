@@ -1,6 +1,7 @@
 import keras as k
 from keras.models import Sequential
 from keras.layers.core import *
+from keras.layers.convolutional import *
 from keras.layers.normalization import BatchNormalization
 from keras import backend as K
 
@@ -12,6 +13,7 @@ from data_utils import *
 
 def reshape_array(arr):
     ''' Reshapes a N dimensional array into a 2D array '''
+    return arr
     N = arr.shape[0]
     arr = arr.reshape((N, -1))
     return arr
@@ -50,7 +52,8 @@ def l2dist(x):
     ''' Chopra '05 computes output = || G(X_1) - G(X_2) ||
         x[0] is G(X_1)
         x[1] is G(X_2) '''
-    return K.sqrt(K.sum(K.square(x[0] - x[1]), axis=1, keepdims=True))
+    #return K.sqrt(K.sum(K.square(x[0] - x[1]), axis=1, keepdims=True))
+    return K.sum(K.abs(x[0] - x[1]), axis=1, keepdims=True)
     
 def generate_data(x, y):
     ''' Generates approximately 55% genuine and 45% impostor pairs
@@ -82,7 +85,7 @@ class SiameseNet:
 
     # Defaults
     TRAINING_BATCH_SIZE   = 64
-    TRAINING_NB_EPOCHS    = 5
+    TRAINING_NB_EPOCHS    = 1
     VALIDATION_BATCH_SIZE = 1
     PREDICT_BATCH_SIZE    = 1
 
@@ -112,6 +115,7 @@ class SiameseNet:
     
     def compile(self):
         self.model.compile(loss=chopra_loss, optimizer='adam')
+        #self.model.compile(loss="categorical_crossentropy", optimizer='adam')
         if self.verbose:
             print 'Successfully compiled the SiameseNet.'
         
@@ -133,7 +137,7 @@ class SiameseNet:
         ''' Predict it. (Not sure if this is helpful) '''
         prediction = self.model.predict(x, batch_size=batch_size)
         if self.verbose:
-            print 'Predicted probabilities are', prediction
+            print 'Predicted probabilities are', prediction[0]
         return prediction
         
     def similarity(self, x1, x2):
@@ -168,11 +172,16 @@ def main():
                     axis=-1,
                     momentum=0.9,
                     weights=None,
-                    input_shape=(N,))
+                    input_shape=(3, 32, 32))
             )) # Not-yet-tuned batch norm without shared weights
-    for _ in xrange(5):
-        layers.append((True, lambda : Dense(10, init=init))) # Dense layers with shared weights
+    #layers.append((False, lambda : Reshape((3, 32, 32))))
+    layers.append((True, lambda : Convolution2D(1, 3, 3, init=init, border_mode='same')))
+    for _ in xrange(1):
+        #layers.append((True, lambda : Dense(10, init=init))) # Dense layers with shared weights
+        layers.append((True, lambda : Convolution2D(1, 3, 3, init=init, border_mode='same')))
         layers.append((False, lambda : Activation('relu'))) # ReLU activation without shared weights
+    layers.append((False, lambda : Flatten()))
+    layers.append((False, lambda : Dense(1)))
 
     sn = SiameseNet(layers, verbose=True)
     sn.compile()
