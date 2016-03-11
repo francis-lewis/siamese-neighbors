@@ -85,7 +85,7 @@ class SiameseNet:
 
     # Defaults
     TRAINING_BATCH_SIZE   = 64
-    TRAINING_NB_EPOCHS    = 1
+    TRAINING_NB_EPOCHS    = 2
     VALIDATION_BATCH_SIZE = 1
     PREDICT_BATCH_SIZE    = 1
 
@@ -137,7 +137,7 @@ class SiameseNet:
         ''' Predict it. (Not sure if this is helpful) '''
         prediction = self.model.predict(x, batch_size=batch_size)
         if self.verbose:
-            print 'Predicted probabilities are', prediction[0]
+            print 'Predicted probabilities are', prediction
         return prediction
         
     def similarity(self, x1, x2):
@@ -187,8 +187,18 @@ def main():
     sn.compile()
     sn.fit(*generate_data(x_train, y_train)) #, validation_data=generate_data(x_val, y_val))
     loss = sn.evaluate(*generate_data(x_val, y_val))
-    prediction = sn.predict(generate_data(x_val, y_val)[0])
-    
+    val_x_dat, val_y_dat = generate_data(x_val, y_val)
+    #prediction = sn.predict(generate_data(x_val, y_val)[0])
+    prediction = sn.predict(val_x_dat)
+
+    preds = [0,0]
+    for i,p in enumerate(prediction):
+        if val_y_dat[i] > .5:
+            preds[1] += p[0]
+        else:
+            preds[0] += p[0]
+    print preds
+
 if __name__ == '__main__':
     main()
     
