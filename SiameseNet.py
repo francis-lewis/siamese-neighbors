@@ -169,7 +169,7 @@ def main():
             lambda : BatchNormalization(
                     epsilon=1e-6,
                     mode=0,
-                    axis=-1,
+                    axis=1,
                     momentum=0.9,
                     weights=None,
                     input_shape=(3, 32, 32))
