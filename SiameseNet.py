@@ -1,5 +1,5 @@
 import keras as k
-from keras.models import Sequential
+from keras.models import Graph, Sequential
 from keras.layers.core import *
 from keras.layers.convolutional import *
 from keras.layers.normalization import BatchNormalization
@@ -22,10 +22,10 @@ def chopra_loss(y_true, y_pred):
 
 def l2dist(x):
     ''' Chopra '05 computes output = || G(X_1) - G(X_2) ||
-        x[0] is G(X_1)
-        x[1] is G(X_2) '''
-    #return K.sqrt(K.sum(K.square(x[0] - x[1]), axis=1, keepdims=True))
-    return K.sum(K.abs(x[0] - x[1]), axis=1, keepdims=True)
+        y is G(X_1)
+        z is G(X_2) '''
+    y, z = x.values()
+    return K.sum(K.abs(y - z), axis=1, keepdims=True)
     
 def generate_data(d, examples_per_image=1):
     ''' Generates 50% genuine and 50% impostor pairs
@@ -83,9 +83,14 @@ class SiameseNet:
     TRAINING_NB_EPOCHS    = 2
     VALIDATION_BATCH_SIZE = 1
     PREDICT_BATCH_SIZE    = 1
+    
+    INPUT_LEFT = 'left'
+    INPUT_RIGHT = 'right'
+    OUTPUT = 'output'
 
-    def __init__(self, structure, verbose=True):
+    def __init__(self, structure, input_shape, verbose=True):
         
+        self.input_shape=(3, 32, 32)
         self.verbose = verbose
         self.construct(structure)
         
@@ -95,42 +100,72 @@ class SiameseNet:
                  is_shared - boolean, whether or not the layer is shared
                  layer_fn - a generator function for a layer '''
         
-        inputs = [Sequential(), Sequential()]
+        self.graph = Graph()
+        input_left = self.INPUT_LEFT
+        input_right = self.INPUT_RIGHT
+        self.graph.add_input(name=input_left, input_shape=self.input_shape)
+        self.graph.add_input(name=input_right, input_shape=self.input_shape)
+        unique_name = 'name'
+ 
         for is_shared, layer_fn in structure:
             if is_shared:
-                add_shared_layer(layer_fn(), inputs)
+                self.graph.add_shared_node(
+                        layer_fn(),
+                        name=unique_name,
+                        inputs=[input_left, input_right],
+                        outputs=[input_left+'\'', input_right+'\''])
             else:
-                for i in xrange(2):
-                    inputs[i].add(layer_fn())
-        
-        self.model = Sequential()
-        self.model.add(LambdaMerge(inputs, function=l2dist))
+                self.graph.add_node(
+                        layer_fn(),
+                        input=input_left,
+                        name=input_left+'\'')
+                self.graph.add_node(
+                        layer_fn(),
+                        input=input_right,
+                        name=input_right+'\'')
+            input_left += '\''
+            input_right += '\''
+            unique_name += '0'
+
+        self.graph.add_node(Lambda(l2dist),
+                inputs=[input_left, input_right],
+                merge_mode='join',
+                name='dist')
+        self.graph.add_output(name=self.OUTPUT, input='dist')
         if self.verbose:
             print 'Constructed a SiameseNet.'
     
     def compile(self):
-        self.model.compile(loss=chopra_loss, optimizer='adam')
-        #self.model.compile(loss="categorical_crossentropy", optimizer='adam')
+        self.graph.compile(loss={'output': chopra_loss}, optimizer='adam')
         if self.verbose:
             print 'Successfully compiled the SiameseNet.'
+            
+    def _transform_data(self, x, y=None):
+        data = {
+                self.INPUT_LEFT: x[0],
+                self.INPUT_RIGHT: x[1]
+            }
+        if y is not None:
+            data[self.OUTPUT] = y
+        return data
         
     def fit(self, x, y, validation_data=None, nb_epoch=TRAINING_NB_EPOCHS,
             batch_size=TRAINING_BATCH_SIZE, shuffle=True):
         ''' Train it. '''
-        self.model.fit(x, y, nb_epoch=nb_epoch, batch_size=batch_size)
+        self.graph.fit(self._transform_data(x, y), nb_epoch=nb_epoch, batch_size=batch_size)
         if self.verbose:
             print 'Done training the SiameseNet.'
         
     def evaluate(self, x, y, batch_size=VALIDATION_BATCH_SIZE):
         ''' Validate it. '''
-        validation_loss = self.model.evaluate(x, y, batch_size=batch_size)
+        validation_loss = self.graph.evaluate(self._transform_data(x, y), batch_size=batch_size)
         if self.verbose:
             print 'Validation loss is', validation_loss
         return validation_loss
         
     def predict(self, x, batch_size=PREDICT_BATCH_SIZE):
         ''' Predict it. (Not sure if this is helpful) '''
-        prediction = self.model.predict(x, batch_size=batch_size)
+        prediction = self.graph.predict(self._transform_data(x), batch_size=batch_size)
         if self.verbose:
             print 'Predicted probabilities are', prediction
         return prediction
@@ -165,8 +200,7 @@ def main():
                     mode=0,
                     axis=1,
                     momentum=0.9,
-                    weights=None,
-                    input_shape=(3, 32, 32))
+                    weights=None)
             )) # Not-yet-tuned batch norm without shared weights
     layers.append((True, lambda : Convolution2D(1, 3, 3, init=init, border_mode='same')))
     for _ in xrange(1):
@@ -175,7 +209,7 @@ def main():
     layers.append((False, lambda : Flatten()))
     layers.append((False, lambda : Dense(1)))
 
-    sn = SiameseNet(layers, verbose=True)
+    sn = SiameseNet(layers, input_shape=(3, 32, 32), verbose=True)
     sn.compile()
 
     d_train = invert_dataset(x_train,  y_train)
@@ -185,7 +219,7 @@ def main():
     loss = sn.evaluate(*generate_data(d_val, examples_per_image=5))
 
     val_x_dat, val_y_dat = generate_data(d_val, examples_per_image=5)
-    prediction = sn.predict(val_x_dat)
+    prediction = sn.predict(val_x_dat)[SiameseNet.OUTPUT]
 
     preds = [0,0]
     for i,p in enumerate(prediction):
