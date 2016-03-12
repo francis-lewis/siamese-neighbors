@@ -1,5 +1,5 @@
 import keras as k
-from keras.models import Graph, Sequential
+from keras.models import Graph
 from keras.layers.core import *
 from keras.layers.convolutional import *
 from keras.layers.normalization import BatchNormalization
@@ -170,12 +170,23 @@ class SiameseNet:
             print 'Predicted probabilities are', prediction
         return prediction
         
+    def save(self, filepath):
+        self.graph.save_weights(filepath)
+        
+    def load(self, filepath):
+        self.graph.load_weights(filepath)
+        
     def similarity(self, x1, x2):
         pass # The crux of this project
     
 ############
 ### Main ###
 ############
+
+def _train_sn(sn, x_train, y_train, filepath):
+    d_train = invert_dataset(x_train,  y_train)
+    sn.fit(*generate_data(d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
+    sn.save(filepath)
 
 def main():
 
@@ -212,8 +223,8 @@ def main():
     sn = SiameseNet(layers, input_shape=(3, 32, 32), verbose=True)
     sn.compile()
 
-    d_train = invert_dataset(x_train,  y_train)
-    sn.fit(*generate_data(d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
+    _train_sn(sn, x_train, y_train, filepath='weights.h5')
+    #sn.load(filepath='weights.h5')
 
     d_val = invert_dataset(x_val,  y_val)
     loss = sn.evaluate(*generate_data(d_val, examples_per_image=5))
