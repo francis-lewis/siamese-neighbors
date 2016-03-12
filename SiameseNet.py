@@ -6,41 +6,13 @@ from keras.layers.normalization import BatchNormalization
 from keras import backend as K
 
 from data_utils import *
+from collections import defaultdict
+
+import random
 
 #########################
 ### Utility Functions ###
 #########################
-
-def reshape_array(arr):
-    ''' Reshapes a N dimensional array into a 2D array '''
-    return arr
-    N = arr.shape[0]
-    arr = arr.reshape((N, -1))
-    return arr
-
-def create_one_hot(y):
-    ''' Creates a one-hot vector for the class y '''
-    y_hot = np.zeros(10)
-    y_hot[y] = 1.0
-    return y_hot
-
-def convert_y(arr):
-    ''' Converts array of classes into array of one-hot vectors '''
-    out = np.zeros((arr.shape[0], 10))
-    for i in xrange(arr.shape[0]):
-        out[i] = create_one_hot(arr[i])
-    return out
-
-def reshape_data(data):
-    ''' Reshapes images into a matrix
-        and classes vector into a one-hot matrix '''
-    temp = data
-    for k, v in data.iteritems():
-        if 'X' in k:
-            temp[k] = reshape_array(v)
-        else:
-            temp[k] = convert_y(v)
-    return temp
 
 def chopra_loss(y_true, y_pred):
     ''' (1-Y)(2/Q)(Ew)^2 + (Y) 2 Q e^(-2.77/Q * Ew)
@@ -55,24 +27,47 @@ def l2dist(x):
     #return K.sqrt(K.sum(K.square(x[0] - x[1]), axis=1, keepdims=True))
     return K.sum(K.abs(x[0] - x[1]), axis=1, keepdims=True)
     
-def generate_data(x, y):
-    ''' Generates approximately 55% genuine and 45% impostor pairs
+def generate_data(d, examples_per_image=1):
+    ''' Generates 50% genuine and 50% impostor pairs
         Returns a ([left_x, right_x], y_target) tuple. '''
-    (x_genuine_1, x_genuine_2), y_genuine = generate_genuine_data(x, y)
-    (x_impostor_1, x_impostor_2), y_impostor = generate_mostly_impostor_data(x, y)
-    index_permutation = np.random.permutation(np.arange(x.shape[0] * 2))
+    print 'Generating data...'
+    (x_genuine_1, x_genuine_2), y_genuine = generate_genuine_data(d, examples_per_image=examples_per_image)
+    (x_impostor_1, x_impostor_2), y_impostor = generate_impostor_data(d, examples_per_image=examples_per_image)
+    index_permutation = np.random.permutation(np.arange(x_genuine_1.shape[0] + x_impostor_1.shape[0]))
     left_x = np.concatenate((x_genuine_1, x_impostor_1), axis=0)[index_permutation,:]
     right_x = np.concatenate((x_genuine_2, x_impostor_2), axis=0)[index_permutation,:]
     y_target = np.concatenate((y_genuine, y_impostor), axis=0)[index_permutation]
+    print 'Done generating data'
     return [left_x, right_x], y_target
 
-def generate_genuine_data(x, y):
-    return [x, x], np.zeros((y.shape[0],))
+def generate_genuine_data(d, examples_per_image=1):
+    left_x, right_x = [], []
+    for label in d:
+        images = d[label]
+        num_images = len(images)
+        for i in xrange(num_images):
+            for j in xrange(examples_per_image): # every image will have examples_per_image genuine matches
+                left_x.append(images[i])
+                right_x.append(images[random.randint(0, num_images - 1)])
+    return [np.array(left_x), np.array(right_x)], np.zeros(len(left_x))
     
-def generate_mostly_impostor_data(x, y):
-    r = np.arange(x.shape[0])
-    rand_ind = np.random.permutation(r)
-    return [x, x[rand_ind,:]], (np.argmax(y, axis=1) != (np.argmax(y, axis=1)[rand_ind]))
+def generate_impostor_data(d, examples_per_image=1):
+    left_x, right_x = [], []
+    for label in d:
+        images = d[label]
+        num_images = len(images)
+        different_labels = [z for z in xrange(len(d)) if z != label]
+        for i in xrange(num_images):
+            for j in xrange(examples_per_image):
+                left_x.append(images[i])
+                right_x.append(random.choice(d[random.choice(different_labels)]))
+    return [np.array(left_x), np.array(right_x)], np.ones(len(left_x))
+
+def invert_dataset(x, y):
+    d = defaultdict(lambda : [])
+    for i, label in enumerate(y):
+        d[label].append(x[i,:,:,:])
+    return d
 
 ##########################
 ### Siamese Net Object ###
@@ -153,12 +148,11 @@ def main():
     print 'Getting CIFAR10 data...'
     
     data = get_CIFAR10_data()
-    data = reshape_data(data)
 
     x_train, y_train = data['X_train'], data['y_train']
     x_val,   y_val   = data['X_val'],   data['y_val']
     
-    N = x_train.shape[1]
+    N = x_train.shape[0]
     
     # Specify structure of Siamese part of SiameseNet
     # This part needs to be improved. I'm kind of just using random layers.
@@ -174,10 +168,8 @@ def main():
                     weights=None,
                     input_shape=(3, 32, 32))
             )) # Not-yet-tuned batch norm without shared weights
-    #layers.append((False, lambda : Reshape((3, 32, 32))))
     layers.append((True, lambda : Convolution2D(1, 3, 3, init=init, border_mode='same')))
     for _ in xrange(1):
-        #layers.append((True, lambda : Dense(10, init=init))) # Dense layers with shared weights
         layers.append((True, lambda : Convolution2D(1, 3, 3, init=init, border_mode='same')))
         layers.append((False, lambda : Activation('relu'))) # ReLU activation without shared weights
     layers.append((False, lambda : Flatten()))
@@ -185,10 +177,14 @@ def main():
 
     sn = SiameseNet(layers, verbose=True)
     sn.compile()
-    sn.fit(*generate_data(x_train, y_train)) #, validation_data=generate_data(x_val, y_val))
-    loss = sn.evaluate(*generate_data(x_val, y_val))
-    val_x_dat, val_y_dat = generate_data(x_val, y_val)
-    #prediction = sn.predict(generate_data(x_val, y_val)[0])
+
+    d_train = invert_dataset(x_train,  y_train)
+    sn.fit(*generate_data(d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
+
+    d_val = invert_dataset(x_val,  y_val)
+    loss = sn.evaluate(*generate_data(d_val, examples_per_image=5))
+
+    val_x_dat, val_y_dat = generate_data(d_val, examples_per_image=5)
     prediction = sn.predict(val_x_dat)
 
     preds = [0,0]
