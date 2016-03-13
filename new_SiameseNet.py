@@ -159,22 +159,25 @@ class SiameseNet:
     def load(self, filepath):
         self.graph.load_weights(filepath)
         
+    """
     def similarity(self, x1, x2):
         x = [x1, x2]
         prediction = self.graph.predict(self._transform_data(x), batch_size=1)
         return prediction['output']
+    """
     
 ############
 ### Main ###
 ############
 
+"""
 def _train_sn(sn, x_train, y_train, filepath):
     d_train = invert_dataset(x_train,  y_train)
     history = sn.fit(*generate_data(x_train, d_train))
     if do_save:
         sn.save(filepath)
     return history
-
+"""
 def main():
 
     # Prepare data
