@@ -21,21 +21,6 @@ import random
 do_save = False
 do_load = False
 
-#####################
-# Logging Callbacks #
-#####################
-
-class LossHistory(k.callbacks.Callback):
-    def on_train_begin(self, logs={}):
-        self.batch_losses = []
-        self.epoch_losses = []
-
-    def on_batch_end(self, batch, logs={}):
-        self.batch_losses.append(logs.get('loss'))
-
-    def on_epoch_end(self, epoch, logs={}):
-        self.epoch_losses.append(logs.get('loss'))
-
 #########################
 ### Utility Functions ###
 #########################
