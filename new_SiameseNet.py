@@ -21,21 +21,6 @@ import random
 do_save = False
 do_load = False
 
-#####################
-# Logging Callbacks #
-#####################
-
-class LossHistory(k.callbacks.Callback):
-    def on_train_begin(self, logs={}):
-        self.batch_losses = []
-        self.epoch_losses = []
-
-    def on_batch_end(self, batch, logs={}):
-        self.batch_losses.append(logs.get('loss'))
-
-    def on_epoch_end(self, epoch, logs={}):
-        self.epoch_losses.append(logs.get('loss'))
-
 #########################
 ### Utility Functions ###
 #########################
@@ -51,47 +36,29 @@ def l2dist(x):
     assert len(x) == 2
     y, z = x.values()
     return K.sqrt(K.sum(K.square(y - z), axis=1, keepdims=True))
-    
-def generate_data(x, d, examples_per_image=1):
-    ''' Generates 50% genuine and 50% impostor pairs
-        Returns a ([left_x, right_x], y_target) tuple. '''
-    print 'Generating data...'
-    (x_genuine_1, x_genuine_2), y_genuine = generate_genuine_data(x, d, examples_per_image=examples_per_image)
-    (x_impostor_1, x_impostor_2), y_impostor = generate_impostor_data(x, d, examples_per_image=examples_per_image)
-    left_x = np.concatenate((x_genuine_1, x_impostor_1), axis=0)
-    right_x = np.concatenate((x_genuine_2, x_impostor_2), axis=0)
-    y_target = np.concatenate((y_genuine, y_impostor), axis=0)
-    print 'Done generating data'
-    return [left_x, right_x], y_target
 
-def generate_genuine_data(x, d, examples_per_image=1):
-    left_x, right_x = [], []
-    for label in d:
-        images = d[label]
-        num_images = len(images)
-        for i in xrange(num_images):
-            for j in xrange(examples_per_image): # every image will have examples_per_image genuine matches
-                left_x.append(x[images[i]])
-                right_x.append(x[images[random.randrange(0, num_images)]])
-    return [np.array(left_x), np.array(right_x)], np.zeros(len(left_x))
-    
-def generate_impostor_data(x, d, examples_per_image=1):
-    left_x, right_x = [], []
-    for label in d:
-        images = d[label]
-        num_images = len(images)
-        different_labels = [z for z in xrange(len(d)) if z != label]
-        for i in xrange(num_images):
-            for j in xrange(examples_per_image):
-                left_x.append(x[images[i]])
-                right_x.append(x[random.choice(d[random.choice(different_labels)])])
-    return [np.array(left_x), np.array(right_x)], np.ones(len(left_x))
+def generate_data(x, d):
+    ''' Basically from the example Keras siamese network code. '''
+    pairs = []
+    labels = []
+    num_labels = len(d)
+    n = min([len(d[j]) for j in range(num_labels)]) - 1
+    for j in range(num_labels):
+        for i in range(n):
+            z1, z2 = d[j][i], d[j][i+1]
+            pairs += [[x[z1], x[z2]]]
+            inc = random.randrange(1, num_labels)
+            jn = (j + inc) % num_labels
+            z1, z2 = d[j][i], d[jn][i]
+            pairs += [[x[z1], x[z2]]]
+            labels += [1, 0]
+    p = np.array(pairs)
+    return [p[:,0], p[:,1]], np.array(labels)
 
 def invert_dataset(x, y):
     d = defaultdict(lambda : [])
     for i, label in enumerate(y):
-        if label < 2:
-            d[label].append(i)
+        d[label].append(i)
     return d
 
 def compute_accuracy(preds, labels):
@@ -201,14 +168,12 @@ class SiameseNet:
 ### Main ###
 ############
 
-"""
 def _train_sn(sn, x_train, y_train, filepath):
     d_train = invert_dataset(x_train,  y_train)
-    history = sn.fit(*generate_data(x_train, d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
+    history = sn.fit(*generate_data(x_train, d_train))
     if do_save:
         sn.save(filepath)
     return history
-"""
 
 def main():
 
@@ -268,9 +233,9 @@ def main():
 
 
     d_val = invert_dataset(x_val,  y_val)
-    loss = sn.evaluate(*generate_data(x_val, d_val, examples_per_image=5))
+    loss = sn.evaluate(*generate_data(x_val, d_val))
 
-    val_x_dat, val_y_dat = generate_data(x_val, d_val, examples_per_image=5)
+    val_x_dat, val_y_dat = generate_data(x_val, d_val)
     prediction = sn.predict(val_x_dat)[SiameseNet.OUTPUT]
 
     ret_preds = prediction
