@@ -18,6 +18,9 @@ from collections import defaultdict
 
 import random
 
+do_save = False
+do_load = False
+
 #########################
 ### Utility Functions ###
 #########################
@@ -86,7 +89,8 @@ def generate_impostor_data(d, examples_per_image=1):
 def invert_dataset(x, y):
     d = defaultdict(lambda : [])
     for i, label in enumerate(y):
-        d[label].append(x[i,:,:,:])
+        if label < 2:
+            d[label].append(x[i,:,:,:])
     return d
 
 def compute_accuracy(preds, labels):
@@ -103,7 +107,7 @@ class SiameseNet:
 
     # Defaults
     TRAINING_BATCH_SIZE   = 64
-    TRAINING_NB_EPOCHS    = 20
+    TRAINING_NB_EPOCHS    = 2
     VALIDATION_BATCH_SIZE = 1
     PREDICT_BATCH_SIZE    = 1
     
@@ -184,9 +188,10 @@ class SiameseNet:
     def fit(self, x, y, validation_data=None, nb_epoch=TRAINING_NB_EPOCHS,
             batch_size=TRAINING_BATCH_SIZE, shuffle=True):
         ''' Train it. '''
-        self.graph.fit(self._transform_data(x, y), nb_epoch=nb_epoch, batch_size=batch_size)
+        history = self.graph.fit(self._transform_data(x, y), nb_epoch=nb_epoch, batch_size=batch_size)
         if self.verbose:
             print 'Done training the SiameseNet.'
+        return history
         
     def evaluate(self, x, y, batch_size=VALIDATION_BATCH_SIZE):
         ''' Validate it. '''
@@ -203,7 +208,9 @@ class SiameseNet:
         return prediction
         
     def save(self, filepath):
+        print 'Saving weights...'
         self.graph.save_weights(filepath)
+        print 'Done saving the weights.'
         
     def load(self, filepath):
         self.graph.load_weights(filepath)
@@ -219,8 +226,10 @@ class SiameseNet:
 
 def _train_sn(sn, x_train, y_train, filepath):
     d_train = invert_dataset(x_train,  y_train)
-    sn.fit(*generate_data(d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
-    #sn.save(filepath)
+    history = sn.fit(*generate_data(d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
+    if do_save:
+        sn.save(filepath)
+    return history
 
 def main():
 
@@ -265,17 +274,21 @@ def main():
     """
     seq.add(Flatten())
     seq.add(Dense(128, activation='relu'))
+    """
     seq.add(Dropout(0.1))
     seq.add(Dense(128, activation='relu'))
     seq.add(Dropout(0.1))
     seq.add(Dense(128, activation='relu'))
+    """
     layers = seq
 
-    sn = SiameseNet(layers, input_shape=(3, 32, 32), verbose=True)
+    sn = SiameseNet(layers, input_shape=in_shp, verbose=True)
     sn.compile()
+    if do_load:
+        sn.load(filepath='weights.h5')
+    history = _train_sn(sn, x_train, y_train, filepath='weights.h5')
+    print history
 
-    _train_sn(sn, x_train, y_train, filepath='weights.h5')
-    #sn.load(filepath='weights.h5')
 
     d_val = invert_dataset(x_val,  y_val)
     loss = sn.evaluate(*generate_data(d_val, examples_per_image=5))
@@ -286,6 +299,8 @@ def main():
     ret_preds = prediction
     max_d = np.max(ret_preds)
     min_d = np.min(ret_preds)
+    print max_d
+    print min_d
     thresh = (max_d + min_d) / 2.0 
     preds = [0,0]
     for i,p in enumerate(prediction):
