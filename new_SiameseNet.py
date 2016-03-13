@@ -28,8 +28,6 @@ do_load = False
 def chopra_loss(y_true, y_pred):
     ''' (1-Y)(2/Q)(Ew)^2 + (Y) 2 Q e^(-2.77/Q * Ew)
         Needs to use functions of keras.backend.theano_backend = K '''
-    #Q = 500.
-    #return (1 - y_true) * 2 / Q * K.square(y_pred) + y_true * 2 * Q * K.exp(-2.77 / Q * y_pred)
     margin = 1
     loss = K.mean(y_true * K.square(y_pred) + (1 - y_true) * K.square(K.maximum(margin - y_pred, 0)))
     return loss
@@ -37,44 +35,32 @@ def chopra_loss(y_true, y_pred):
 def l2dist(x):
     assert len(x) == 2
     y, z = x.values()
-    c = 1e2
-    y /= c
-    z /= c
-
     return K.sqrt(K.sum(K.square(y - z), axis=1, keepdims=True))
-
-def l1dist(x):
-    ''' Chopra '05 computes output = || G(X_1) - G(X_2) ||
-        y is G(X_1)
-        z is G(X_2) '''
-    y, z = x.values()
-    return K.sum(K.abs(y - z), axis=1, keepdims=True)
     
-def generate_data(d, examples_per_image=1):
+def generate_data(x, d, examples_per_image=1):
     ''' Generates 50% genuine and 50% impostor pairs
         Returns a ([left_x, right_x], y_target) tuple. '''
     print 'Generating data...'
-    (x_genuine_1, x_genuine_2), y_genuine = generate_genuine_data(d, examples_per_image=examples_per_image)
-    (x_impostor_1, x_impostor_2), y_impostor = generate_impostor_data(d, examples_per_image=examples_per_image)
-    index_permutation = np.random.permutation(np.arange(x_genuine_1.shape[0] + x_impostor_1.shape[0]))
-    left_x = np.concatenate((x_genuine_1, x_impostor_1), axis=0)[index_permutation,:]
-    right_x = np.concatenate((x_genuine_2, x_impostor_2), axis=0)[index_permutation,:]
-    y_target = np.concatenate((y_genuine, y_impostor), axis=0)[index_permutation]
+    (x_genuine_1, x_genuine_2), y_genuine = generate_genuine_data(x, d, examples_per_image=examples_per_image)
+    (x_impostor_1, x_impostor_2), y_impostor = generate_impostor_data(x, d, examples_per_image=examples_per_image)
+    left_x = np.concatenate((x_genuine_1, x_impostor_1), axis=0)
+    right_x = np.concatenate((x_genuine_2, x_impostor_2), axis=0)
+    y_target = np.concatenate((y_genuine, y_impostor), axis=0)
     print 'Done generating data'
     return [left_x, right_x], y_target
 
-def generate_genuine_data(d, examples_per_image=1):
+def generate_genuine_data(x, d, examples_per_image=1):
     left_x, right_x = [], []
     for label in d:
         images = d[label]
         num_images = len(images)
         for i in xrange(num_images):
             for j in xrange(examples_per_image): # every image will have examples_per_image genuine matches
-                left_x.append(images[i])
-                right_x.append(images[random.randint(0, num_images - 1)])
+                left_x.append(x[images[i]])
+                right_x.append(x[images[random.randrange(0, num_images)]])
     return [np.array(left_x), np.array(right_x)], np.zeros(len(left_x))
     
-def generate_impostor_data(d, examples_per_image=1):
+def generate_impostor_data(x, d, examples_per_image=1):
     left_x, right_x = [], []
     for label in d:
         images = d[label]
@@ -82,15 +68,15 @@ def generate_impostor_data(d, examples_per_image=1):
         different_labels = [z for z in xrange(len(d)) if z != label]
         for i in xrange(num_images):
             for j in xrange(examples_per_image):
-                left_x.append(images[i])
-                right_x.append(random.choice(d[random.choice(different_labels)]))
+                left_x.append(x[images[i]])
+                right_x.append(x[random.choice(d[random.choice(different_labels)])])
     return [np.array(left_x), np.array(right_x)], np.ones(len(left_x))
 
 def invert_dataset(x, y):
     d = defaultdict(lambda : [])
     for i, label in enumerate(y):
         if label < 2:
-            d[label].append(x[i,:,:,:])
+            d[label].append(i)
     return d
 
 def compute_accuracy(preds, labels):
@@ -137,32 +123,6 @@ class SiameseNet:
         dist_name = 'dist'
         self.graph.add_shared_node(structure, name=shared_name, 
             inputs=[input_left, input_right], merge_mode='join') 
-        """
-        for is_shared, layer_fn in structure:
-            if is_shared:
-                self.graph.add_shared_node(
-                        layer_fn(),
-                        name=unique_name,
-                        inputs=[input_left, input_right],
-                        outputs=[input_left+'\'', input_right+'\''])
-            else:
-                self.graph.add_node(
-                        layer_fn(),
-                        input=input_left,
-                        name=input_left+'\'')
-                self.graph.add_node(
-                        layer_fn(),
-                        input=input_right,
-                        name=input_right+'\'')
-            input_left += '\''
-            input_right += '\''
-            unique_name += '0'
-
-        self.graph.add_node(Lambda(l2dist),
-                inputs=[input_left, input_right],
-                merge_mode='join',
-                name='dist')
-        """
         self.graph.add_node(Lambda(l2dist),
                 input=shared_name,
                 name=dist_name)
@@ -226,7 +186,7 @@ class SiameseNet:
 
 def _train_sn(sn, x_train, y_train, filepath):
     d_train = invert_dataset(x_train,  y_train)
-    history = sn.fit(*generate_data(d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
+    history = sn.fit(*generate_data(x_train, d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
     if do_save:
         sn.save(filepath)
     return history
@@ -291,9 +251,9 @@ def main():
 
 
     d_val = invert_dataset(x_val,  y_val)
-    loss = sn.evaluate(*generate_data(d_val, examples_per_image=5))
+    loss = sn.evaluate(*generate_data(x_val, d_val, examples_per_image=5))
 
-    val_x_dat, val_y_dat = generate_data(d_val, examples_per_image=5)
+    val_x_dat, val_y_dat = generate_data(x_val, d_val, examples_per_image=5)
     prediction = sn.predict(val_x_dat)[SiameseNet.OUTPUT]
 
     ret_preds = prediction
