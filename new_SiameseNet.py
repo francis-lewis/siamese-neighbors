@@ -21,6 +21,21 @@ import random
 do_save = False
 do_load = False
 
+#####################
+# Logging Callbacks #
+#####################
+
+class LossHistory(k.callbacks.Callback):
+    def on_train_begin(self, logs={}):
+        self.batch_losses = []
+        self.epoch_losses = []
+
+    def on_batch_end(self, batch, logs={}):
+        self.batch_losses.append(logs.get('loss'))
+
+    def on_epoch_end(self, epoch, logs={}):
+        self.epoch_losses.append(logs.get('loss'))
+
 #########################
 ### Utility Functions ###
 #########################
@@ -93,7 +108,7 @@ class SiameseNet:
 
     # Defaults
     TRAINING_BATCH_SIZE   = 64
-    TRAINING_NB_EPOCHS    = 2
+    TRAINING_NB_EPOCHS    = 30
     VALIDATION_BATCH_SIZE = 1
     PREDICT_BATCH_SIZE    = 1
     
@@ -148,7 +163,9 @@ class SiameseNet:
     def fit(self, x, y, validation_data=None, nb_epoch=TRAINING_NB_EPOCHS,
             batch_size=TRAINING_BATCH_SIZE, shuffle=True):
         ''' Train it. '''
-        history = self.graph.fit(self._transform_data(x, y), nb_epoch=nb_epoch, batch_size=batch_size)
+        if validation_data is not None:
+            validation_data = self._transform_data(validation_data[0], validation_data[1])
+        history = self.graph.fit(self._transform_data(x, y), validation_data=validation_data, nb_epoch=nb_epoch, batch_size=batch_size)
         if self.verbose:
             print 'Done training the SiameseNet.'
         return history
@@ -184,12 +201,14 @@ class SiameseNet:
 ### Main ###
 ############
 
+"""
 def _train_sn(sn, x_train, y_train, filepath):
     d_train = invert_dataset(x_train,  y_train)
     history = sn.fit(*generate_data(x_train, d_train, examples_per_image=1)) #, validation_data=generate_data(x_val, y_val))
     if do_save:
         sn.save(filepath)
     return history
+"""
 
 def main():
 
@@ -234,12 +253,10 @@ def main():
     """
     seq.add(Flatten())
     seq.add(Dense(128, activation='relu'))
-    """
     seq.add(Dropout(0.1))
     seq.add(Dense(128, activation='relu'))
     seq.add(Dropout(0.1))
     seq.add(Dense(128, activation='relu'))
-    """
     layers = seq
 
     sn = SiameseNet(layers, input_shape=in_shp, verbose=True)
