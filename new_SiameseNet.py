@@ -1,8 +1,16 @@
+from __future__ import absolute_import
+#from __future__ import print_function
+import numpy as np
+
+import random
+
 import keras as k
-from keras.models import Graph
+from keras.datasets import cifar10
+from keras.models import Sequential, Graph
 from keras.layers.core import *
 from keras.layers.convolutional import *
 from keras.layers.normalization import BatchNormalization
+from keras.optimizers import SGD, RMSprop
 from keras import backend as K
 
 from data_utils import *
@@ -77,6 +85,9 @@ def invert_dataset(x, y):
         d[label].append(x[i,:,:,:])
     return d
 
+def compute_accuracy(preds, labels):
+    return labels[preds.ravel() < 0.5].mean()
+
 ##########################
 ### Siamese Net Object ###
 ##########################
@@ -114,7 +125,11 @@ class SiameseNet:
         self.graph.add_input(name=input_left, input_shape=self.input_shape)
         self.graph.add_input(name=input_right, input_shape=self.input_shape)
         unique_name = 'name'
- 
+        shared_name = 'shared'
+        dist_name = 'dist'
+        self.graph.add_shared_node(structure, name=shared_name, 
+            inputs=[input_left, input_right], merge_mode='join') 
+        """
         for is_shared, layer_fn in structure:
             if is_shared:
                 self.graph.add_shared_node(
@@ -139,7 +154,11 @@ class SiameseNet:
                 inputs=[input_left, input_right],
                 merge_mode='join',
                 name='dist')
-        self.graph.add_output(name=self.OUTPUT, input='dist')
+        """
+        self.graph.add_node(Lambda(l2dist),
+                input=shared_name,
+                name=dist_name)
+        self.graph.add_output(name=self.OUTPUT, input=dist_name)
         if self.verbose:
             print 'Constructed a SiameseNet.'
     
@@ -211,7 +230,16 @@ def main():
     # Specify structure of Siamese part of SiameseNet
     # This part needs to be improved. I'm kind of just using random layers.
     init = 'glorot_uniform'
-    layers = []
+    in_shp = (3,32,32)
+    seq = Sequential()
+    seq.add(BatchNormalization(epsilon=1e-7,
+                                mode=0,
+                                axis=1,
+                                momentum=0.9,
+                                weights=None,
+                                input_shape=in_shp))
+    """
+    #layers = []
     layers.append((
             False,
             lambda : BatchNormalization(
@@ -227,6 +255,14 @@ def main():
         layers.append((False, lambda : Activation('relu'))) # ReLU activation without shared weights
     layers.append((False, lambda : Flatten()))
     layers.append((False, lambda : Dense(100)))
+    """
+    seq.add(Flatten())
+    seq.add(Dense(128, activation='relu'))
+    seq.add(Dropout(0.1))
+    seq.add(Dense(128, activation='relu'))
+    seq.add(Dropout(0.1))
+    seq.add(Dense(128, activation='relu'))
+    layers = seq
 
     sn = SiameseNet(layers, input_shape=(3, 32, 32), verbose=True)
     sn.compile()
