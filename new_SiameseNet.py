@@ -34,6 +34,10 @@ def chopra_loss(y_true, y_pred):
 def l2dist(x):
     assert len(x) == 2
     y, z = x.values()
+    c = 1e2
+    y /= c
+    z /= c
+
     return K.sqrt(K.sum(K.square(y - z), axis=1, keepdims=True))
 
 def l1dist(x):
@@ -99,7 +103,7 @@ class SiameseNet:
 
     # Defaults
     TRAINING_BATCH_SIZE   = 64
-    TRAINING_NB_EPOCHS    = 2
+    TRAINING_NB_EPOCHS    = 20
     VALIDATION_BATCH_SIZE = 1
     PREDICT_BATCH_SIZE    = 1
     
@@ -163,6 +167,7 @@ class SiameseNet:
             print 'Constructed a SiameseNet.'
     
     def compile(self):
+        #sgd = SGD(lr=1e-7, decay=1e-6, momentum=0.9, nesterov=True)
         self.graph.compile(loss={'output': chopra_loss}, optimizer='adam')
         if self.verbose:
             print 'Successfully compiled the SiameseNet.'
@@ -204,7 +209,9 @@ class SiameseNet:
         self.graph.load_weights(filepath)
         
     def similarity(self, x1, x2):
-        pass # The crux of this project
+        x = [x1, x2]
+        prediction = self.graph.predict(self._transform_data(x), batch_size=1)
+        return prediction['output']
     
 ############
 ### Main ###
@@ -276,12 +283,17 @@ def main():
     val_x_dat, val_y_dat = generate_data(d_val, examples_per_image=5)
     prediction = sn.predict(val_x_dat)[SiameseNet.OUTPUT]
 
+    ret_preds = prediction
+    max_d = np.max(ret_preds)
+    min_d = np.min(ret_preds)
+    thresh = (max_d + min_d) / 2.0 
     preds = [0,0]
     for i,p in enumerate(prediction):
-        if val_y_dat[i] > .5:
-            preds[1] += p[0]
+        if ret_preds[i] > thresh:
+            preds[1] += 1
         else:
-            preds[0] += p[0]
+            preds[0] += 1
+
     print preds
 
 if __name__ == '__main__':
